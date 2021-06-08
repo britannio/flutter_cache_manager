@@ -2,8 +2,10 @@ import 'dart:developer';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart';
+
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 const supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'gif', 'cur', 'ico'];
 mixin ImageCacheManager on BaseCacheManager {
@@ -61,59 +63,6 @@ mixin ImageCacheManager on BaseCacheManager {
   }
 
   final Map<String, Stream<FileResponse>> _runningResizes = {};
-  Future<FileInfo> _resizeImageFile(
-    FileInfo originalFile,
-    String key,
-    int? maxWidth,
-    int? maxHeight,
-  ) async {
-    Timeline.startSync(
-      '_resizeImageFile',
-      arguments: {'file': originalFile.file.path},
-    );
-    var originalFileName = originalFile.file.path;
-    var fileExtension = originalFileName.split('.').last;
-    if (!supportedFileNames.contains(fileExtension)) {
-      return originalFile;
-    }
-
-    Timeline.startSync('decodeImage');
-    var image = decodeImage(await originalFile.file.readAsBytes())!;
-    Timeline.finishSync();
-    if (maxWidth != null && maxHeight != null) {
-      var resizeFactorWidth = image.width / maxWidth;
-      var resizeFactorHeight = image.height / maxHeight;
-      var resizeFactor = max(resizeFactorHeight, resizeFactorWidth);
-
-      maxWidth = (image.width / resizeFactor).round();
-      maxHeight = (image.height / resizeFactor).round();
-    }
-
-    Timeline.startSync('copyResize');
-    var resized = copyResize(image, width: maxWidth, height: maxHeight);
-    Timeline.finishSync();
-    Timeline.startSync('encodeNamedImage');
-    var resizedFile = encodeNamedImage(resized, originalFileName)!;
-    Timeline.finishSync();
-    var maxAge = originalFile.validTill.difference(DateTime.now());
-
-    var file = await putFile(
-      originalFile.originalUrl,
-      Uint8List.fromList(resizedFile),
-      key: key,
-      maxAge: maxAge,
-      fileExtension: fileExtension,
-    );
-
-    Timeline.finishSync();
-
-    return FileInfo(
-      file,
-      originalFile.source,
-      originalFile.validTill,
-      originalFile.originalUrl,
-    );
-  }
 
   Stream<FileResponse> _fetchedResizedFile(
     String url,
@@ -134,13 +83,86 @@ mixin ImageCacheManager on BaseCacheManager {
         yield response;
       }
       if (response is FileInfo) {
-        yield await _resizeImageFile(
+        yield await compute<ResizeImageInfo, FileResponse>(
+          _resizeImageFile,
+          ResizeImageInfo(
+              originalFile: response,
+              key: resizedKey,
+              cacheManager: this,
+              maxHeight: maxHeight,
+              maxWidth: maxWidth),
+        );
+        /*yield await _resizeImageFile(
           response,
           resizedKey,
           maxWidth,
           maxHeight,
-        );
+        );*/
       }
     }
   }
+}
+
+class ResizeImageInfo {
+  final FileInfo originalFile;
+  final String key;
+  int? maxWidth;
+  int? maxHeight;
+  final BaseCacheManager cacheManager;
+  ResizeImageInfo({
+    required this.originalFile,
+    required this.key,
+    required this.cacheManager,
+    this.maxWidth,
+    this.maxHeight,
+  });
+}
+
+Future<FileInfo> _resizeImageFile(ResizeImageInfo info) async {
+  Timeline.startSync(
+    '_resizeImageFile',
+    arguments: {'file': info.originalFile.file.path},
+  );
+  var originalFileName = info.originalFile.file.path;
+  var fileExtension = originalFileName.split('.').last;
+  if (!supportedFileNames.contains(fileExtension)) {
+    return info.originalFile;
+  }
+
+  Timeline.startSync('decodeImage');
+  var image = decodeImage(await info.originalFile.file.readAsBytes())!;
+  Timeline.finishSync();
+  if (info.maxWidth != null && info.maxHeight != null) {
+    var resizeFactorWidth = image.width / info.maxWidth!;
+    var resizeFactorHeight = image.height / info.maxHeight!;
+    var resizeFactor = max(resizeFactorHeight, resizeFactorWidth);
+
+    info.maxWidth = (image.width / resizeFactor).round();
+    info.maxHeight = (image.height / resizeFactor).round();
+  }
+
+  Timeline.startSync('copyResize');
+  var resized = copyResize(image, width: info.maxWidth, height: info.maxHeight);
+  Timeline.finishSync();
+  Timeline.startSync('encodeNamedImage');
+  var resizedFile = encodeNamedImage(resized, originalFileName)!;
+  Timeline.finishSync();
+  var maxAge = info.originalFile.validTill.difference(DateTime.now());
+
+  var file = await info.cacheManager.putFile(
+    info.originalFile.originalUrl,
+    Uint8List.fromList(resizedFile),
+    key: info.key,
+    maxAge: maxAge,
+    fileExtension: fileExtension,
+  );
+
+  Timeline.finishSync();
+
+  return FileInfo(
+    file,
+    info.originalFile.source,
+    info.originalFile.validTill,
+    info.originalFile.originalUrl,
+  );
 }
