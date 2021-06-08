@@ -1,3 +1,4 @@
+import 'dart:developer';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -66,13 +67,19 @@ mixin ImageCacheManager on BaseCacheManager {
     int? maxWidth,
     int? maxHeight,
   ) async {
+    Timeline.startSync(
+      '_resizeImageFile',
+      arguments: {'file': originalFile.file.path},
+    );
     var originalFileName = originalFile.file.path;
     var fileExtension = originalFileName.split('.').last;
     if (!supportedFileNames.contains(fileExtension)) {
       return originalFile;
     }
 
+    Timeline.startSync('decodeImage');
     var image = decodeImage(await originalFile.file.readAsBytes())!;
+    Timeline.finishSync();
     if (maxWidth != null && maxHeight != null) {
       var resizeFactorWidth = image.width / maxWidth;
       var resizeFactorHeight = image.height / maxHeight;
@@ -82,8 +89,12 @@ mixin ImageCacheManager on BaseCacheManager {
       maxHeight = (image.height / resizeFactor).round();
     }
 
+    Timeline.startSync('copyResize');
     var resized = copyResize(image, width: maxWidth, height: maxHeight);
+    Timeline.finishSync();
+    Timeline.startSync('encodeNamedImage');
     var resizedFile = encodeNamedImage(resized, originalFileName)!;
+    Timeline.finishSync();
     var maxAge = originalFile.validTill.difference(DateTime.now());
 
     var file = await putFile(
@@ -93,6 +104,8 @@ mixin ImageCacheManager on BaseCacheManager {
       maxAge: maxAge,
       fileExtension: fileExtension,
     );
+
+    Timeline.finishSync();
 
     return FileInfo(
       file,
