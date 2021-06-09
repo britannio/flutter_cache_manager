@@ -83,21 +83,24 @@ mixin ImageCacheManager on BaseCacheManager {
         yield response;
       }
       if (response is FileInfo) {
-        yield await compute<ResizeImageInfo, FileResponse>(
+        /*yield await compute<ResizeImageInfo, FileResponse>(
           _resizeImageFile,
           ResizeImageInfo(
-              originalFile: response,
-              key: resizedKey,
-              cacheManager: this,
-              maxHeight: maxHeight,
-              maxWidth: maxWidth),
-        );
-        /*yield await _resizeImageFile(
-          response,
-          resizedKey,
-          maxWidth,
-          maxHeight,
-        );*/
+            originalFile: response,
+            key: resizedKey,
+            cacheManager: this,
+            maxHeight: maxHeight,
+            maxWidth: maxWidth,
+          ),
+          debugLabel: 'computeSizeChange',
+        ); */
+        yield await _resizeImageFile(ResizeImageInfo(
+          originalFile: response,
+          key: resizedKey,
+          cacheManager: this,
+          maxHeight: maxHeight,
+          maxWidth: maxWidth,
+        ));
       }
     }
   }
@@ -130,7 +133,14 @@ Future<FileInfo> _resizeImageFile(ResizeImageInfo info) async {
   }
 
   Timeline.startSync('decodeImage');
-  var image = decodeImage(await info.originalFile.file.readAsBytes())!;
+  Timeline.startSync('readOriginalFile');
+  final imageBytes = await info.originalFile.file.readAsBytes();
+  Timeline.finishSync();
+  var image = (await compute<List<int>, Image?>(
+    decodeImage,
+    imageBytes,
+    debugLabel: 'computeDecodeImage',
+  ))!;
   Timeline.finishSync();
   if (info.maxWidth != null && info.maxHeight != null) {
     var resizeFactorWidth = image.width / info.maxWidth!;
